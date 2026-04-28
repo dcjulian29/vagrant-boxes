@@ -1,0 +1,14 @@
+# Packer build artifacts
+build/
+boxes/
+packer/debian/output-*/
+packer/almalinux/output-*/
+packer/debian/.packer_cache/
+packer/almalinux/.packer_cache/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Windows
+Thumbs.db
