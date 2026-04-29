@@ -54,6 +54,11 @@ variable "cpus" {
   default     = 2
 }
 
+variable "cidata_iso" {
+  description = "Absolute path to the cloud-init seed ISO created by the build script"
+  type        = string
+}
+
 # ---------------------------------------------------------------------------
 # Source
 # ---------------------------------------------------------------------------
@@ -75,19 +80,14 @@ source "virtualbox-ovf" "box" {
   # Packer writes output VM files here; the post-processor then packages them.
   output_directory = "tmp/output-${var.os_name}"
 
-  # Attach the cloud-init NoCloud seed so the cloud image configures the
-  # vagrant user and enables SSH password authentication on first boot.
-  # The label "cidata" is required by the NoCloud data-source spec.
-  cd_files = [
-    "cloud-init/user-data",
-    "cloud-init/meta-data",
-  ]
-
-  cd_label = "cidata"
-
   vboxmanage = [
     ["modifyvm", "{{.Name}}", "--memory", "${var.memory}"],
     ["modifyvm", "{{.Name}}", "--cpus",   "${var.cpus}"],
+    ["storagectl",    "{{.Name}}", "--name", "SATA", "--portcount", "4"],
+    ["storageattach", "{{.Name}}", "--storagectl", "SATA",
+      "--port", "1", "--device", "0",
+      "--type", "dvddrive", "--medium", "${var.cidata_iso}"
+    ],
   ]
 }
 
