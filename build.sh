@@ -51,8 +51,18 @@ get_vbox_os_type() {
 
 # =============================================================================
 
-OS_ARG="${1:-all}"
-VERSION="${2:-$(date +%Y%m%d)}"
+case "${1:-}" in
+  virtualbox|libvirt)
+    PROVIDER="${1}"
+    OS_ARG="${2:-all}"
+    VERSION="${3:-$(date +%Y%m%d)}"
+    ;;
+  *)
+    PROVIDER="virtualbox"
+    OS_ARG="${1:-all}"
+    VERSION="${2:-$(date +%Y%m%d)}"
+    ;;
+esac
 
 # ---- Resolve build list -----------------------------------------------------
 if [ "$OS_ARG" = "all" ]; then
@@ -73,6 +83,7 @@ fi
 # whether the build succeeds, fails, or is interrupted via Ctrl+C.
 
 KVM_MODULE=""
+LIBVIRT_WAS_RUNNING=false
 
 detect_kvm() {
   if grep -q "^kvm_intel " /proc/modules; then
@@ -91,7 +102,24 @@ detect_kvm() {
 disable_kvm() {
   [ -z "$KVM_MODULE" ] && return 0
   echo "==> Disabling KVM ($KVM_MODULE) for VirtualBox build..."
-  sudo modprobe -r "$KVM_MODULE"
+
+  # libvirtd/virtqemud holds /dev/kvm open even with no VMs running.
+  # Stop it temporarily so the modules can be unloaded.
+  for svc in virtqemud libvirtd; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      echo "==> Stopping libvirt daemon ($svc) to release KVM modules..."
+      sudo systemctl stop virtlogd virtlockd virtqemud libvirtd 2>/dev/null || true
+      LIBVIRT_WAS_RUNNING=true
+      sleep 2
+      break
+    fi
+  done
+
+  if ! sudo modprobe -r "$KVM_MODULE"; then
+    echo "ERROR: Cannot unload $KVM_MODULE - a process other than libvirt is using KVM."
+    echo "       Stop any running VMs and retry."
+    return 1
+  fi
   sudo modprobe -r kvm
   echo "==> KVM modules disabled."
 }
@@ -101,6 +129,13 @@ enable_kvm() {
   echo "==> Re-enabling KVM modules ($KVM_MODULE)..."
   sudo modprobe kvm
   sudo modprobe "$KVM_MODULE"
+
+  if [ "$LIBVIRT_WAS_RUNNING" = true ]; then
+    echo "==> Restarting libvirt daemon..."
+    sudo systemctl start libvirtd 2>/dev/null || true
+    LIBVIRT_WAS_RUNNING=false
+  fi
+
   echo "==> KVM modules re-enabled."
 }
 
@@ -118,6 +153,13 @@ check_prereqs() {
      ! command -v xorriso     >/dev/null 2>&1 && \
      ! command -v mkisofs     >/dev/null 2>&1; then
     missing="$missing genisoimage(sudo apt install genisoimage)"
+  fi
+
+  if [ "$PROVIDER" = "libvirt" ]; then
+    command -v virt-customize >/dev/null 2>&1 || \
+      missing="$missing virt-customize(sudo apt install libguestfs-tools)"
+    [ -f /usr/share/OVMF/OVMF_CODE_4M.fd ] || \
+      missing="$missing OVMF(sudo apt install ovmf)"
   fi
 
   if [ -n "$missing" ]; then
@@ -152,7 +194,7 @@ create_cidata_iso() {
 }
 
 # ---- Prepare: download cloud image and convert to OVA -----------------------
-prepare_image() {
+prepare_image_virtualbox() {
   local name="$1"
   local url
   local os_type
@@ -178,7 +220,6 @@ prepare_image() {
 
   echo "==> [$name] Converting qcow2 -> VMDK..."
   qemu-img convert -p -f qcow2 -O vmdk "$qcow2" "$vmdk"
-  rm -f "$qcow2"
 
   echo "==> [$name] Creating OVA..."
   local tmpvm="${name}-prep-$$"
@@ -196,8 +237,8 @@ prepare_image() {
   echo "==> [$name] OVA ready: $ova"
 }
 
-# ---- Build a single box -----------------------------------------------------
-build_box() {
+# ---- Build a single VirtualBox box -----------------------------------------------------
+build_box_virtualbox() {
   local name="$1"
   local cidata_iso="$2"
   local rc
@@ -209,7 +250,7 @@ build_box() {
   echo "  Output  : boxes/${name}-${VERSION}-virtualbox.box"
   echo "------------------------------------------------------------"
 
-  prepare_image "$name"
+  prepare_image_virtualbox "$name"
   mkdir -p boxes
 
   # Clean up any leftover VM from a previous failed or interrupted build
@@ -246,25 +287,119 @@ build_box() {
   echo "==> [$name] Complete -> boxes/${name}-${VERSION}-virtualbox.box"
 }
 
+# ---- Prepare: download cloud image (libvirt - qcow2 used directly) -----------
+prepare_image_libvirt() {
+  local name="$1"
+  local url
+  url="$(get_cloud_img_url "$name")"
+
+  local qcow2="tmp/${name}.qcow2"
+
+  mkdir -p tmp
+
+  if [ -f "$qcow2" ]; then
+    echo "==> [$name] Cached qcow2 found - skipping download."
+    echo "    Delete $qcow2 to force a fresh download."
+    return 0
+  fi
+
+  echo ""
+  echo "==> [$name] Downloading cloud image..."
+  echo "    $url"
+  curl -fL --progress-bar "$url" -o "$qcow2"
+
+  echo "==> [$name] qcow2 ready: $qcow2"
+}
+
+# ---- Build a single libvirt box ---------------------------------------------
+build_box_libvirt() {
+  local name="$1"
+  local cidata_iso="$2"
+  local rc
+
+  echo ""
+  echo "------------------------------------------------------------"
+  echo "  OS       : $name"
+  echo "  Provider : libvirt"
+  echo "  Version  : $VERSION"
+  echo "  Output   : boxes/${name}-${VERSION}-libvirt.box"
+  echo "------------------------------------------------------------"
+
+  prepare_image_libvirt "$name"
+  mkdir -p boxes
+
+  local qcow2_path
+  qcow2_path="$(pwd)/tmp/${name}.qcow2"
+
+  echo "==> [$name] Cleaning up any leftover build output..."
+  rm -rf "tmp/output-${name}-libvirt"
+
+  echo ""
+  echo "==> [$name] Initializing Packer plugins..."
+  packer init packer/libvirt.pkr.hcl
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    echo "ERROR: [$name] packer init failed (exit code $rc)"
+    return $rc
+  fi
+
+  echo "==> [$name] Running Packer build (libvirt)..."
+  echo "    input_qcow2 = $qcow2_path"
+  echo "    cidata_iso  = $cidata_iso"
+
+
+  packer build \
+    -var "version=${VERSION}" \
+    -var "input_qcow2=${qcow2_path}" \
+    -var "cidata_iso=${cidata_iso}" \
+    -var-file="os/${name}.pkrvars.hcl" \
+    packer/libvirt.pkr.hcl
+
+  rc=$?
+
+  if [ $rc -ne 0 ]; then
+    echo "ERROR: [$name] Packer build failed (exit code $rc)"
+    return $rc
+  fi
+
+  echo ""
+  echo "==> [$name] Complete -> boxes/${name}-${VERSION}-libvirt.box"
+}
+
+# ---- Dispatch to the correct build function for the active provider ---------
+run_build() {
+  local name="$1"
+  local cidata_iso="$2"
+  case "$PROVIDER" in
+    libvirt) build_box_libvirt "$name" "$cidata_iso" ;;
+    *)       build_box_virtualbox "$name" "$cidata_iso" ;;
+  esac
+}
+
 # =============================================================================
 
 check_prereqs
 detect_kvm
-trap 'enable_kvm' EXIT
-disable_kvm
+
+# VirtualBox conflicts with KVM - disable for the build, restore on exit.
+# libvirt requires KVM to be active - leave it alone.
+if [ "$PROVIDER" = "virtualbox" ]; then
+  trap 'enable_kvm' EXIT
+  disable_kvm
+fi
 
 mkdir -p tmp
 CIDATA_ISO="$(pwd)/tmp/cidata.iso"
 create_cidata_iso "$CIDATA_ISO" "cloud-init"
 
 echo ""
-echo "=== Vagrant Box Builder (VirtualBox) ==="
+echo "=== Vagrant Box Builder ($PROVIDER) ==="
 echo "Targets : ${BUILD_LIST[*]}"
 echo "Version : $VERSION"
 
 failed=""
 for os_name in "${BUILD_LIST[@]}"; do
-  if build_box "$os_name" "$CIDATA_ISO"; then
+  if run_build "$os_name" "$CIDATA_ISO"; then
     echo "OK : $os_name"
   else
     echo "FAILED : $os_name"
@@ -281,6 +416,6 @@ else
   echo ""
   echo "Generated boxes:"
   for os_name in "${BUILD_LIST[@]}"; do
-    echo "  boxes/${os_name}-${VERSION}-virtualbox.box"
+    echo "  boxes/${os_name}-${VERSION}-${PROVIDER}.box"
   done
 fi
