@@ -1,18 +1,18 @@
 # =============================================================================
-# Shared VirtualBox Packer template.
+# Shared Hyper-V Packer template.
 # All OS-specific values are supplied by the per-OS .pkrvars.hcl files in os/
-# and the -var "version=..." flag passed by the build script.
+# and -var flags passed by the build script.
 # =============================================================================
 
 packer {
   required_plugins {
-    virtualbox = {
+    hyperv = {
       version = ">= 1.1.0"
-      source  = "github.com/hashicorp/virtualbox"
+      source  = "github.com/hashicorp/hyperv"
     }
     vagrant = {
       version = ">= 1.1.0"
-      source = "github.com/hashicorp/vagrant"
+      source  = "github.com/hashicorp/vagrant"
     }
   }
 }
@@ -26,12 +26,17 @@ variable "os_name" {
 }
 
 variable "vm_name" {
-  description = "VirtualBox VM display name during the build"
+  description = "VM display name during the build"
   type        = string
 }
 
-variable "input_ova" {
-  description = "Path to the OVA produced by the prepare step in the build script"
+variable "input_vmcx" {
+  description = "Path to the exported Hyper-V VM directory produced by the prepare step"
+  type        = string
+}
+
+variable "cidata_iso" {
+  description = "Absolute path to the cloud-init seed ISO"
   type        = string
 }
 
@@ -58,48 +63,57 @@ variable "cpus" {
   default     = 2
 }
 
-variable "cidata_iso" {
-  description = "Absolute path to the cloud-init seed ISO created by the build script"
+variable "disk_size" {
+  description = "Disk size in MB - VHDX is resized to this"
+  type        = number
+  default     = 20480
+}
+
+variable "switch_name" {
+  description = "Hyper-V virtual switch name to attach during build"
   type        = string
+  default     = "Default Switch"
 }
 
 # ---------------------------------------------------------------------------
 # Source
 # ---------------------------------------------------------------------------
-source "virtualbox-ovf" "box" {
-  source_path  = var.input_ova
+source "hyperv-vmcx" "box" {
   vm_name      = var.vm_name
-  communicator = "ssh"
-  ssh_username = "vagrant"
-  ssh_password = "vagrant"
-  ssh_timeout  = "30m"
+  cpus         = var.cpus
+  memory       = var.memory
+  switch_name  = var.switch_name
 
-  # Allow many connection attempts so cloud-init has time to finish creating
-  # the vagrant user before Packer starts the SSH handshake.
-  ssh_handshake_attempts = 60
+  clone_from_vmcx_path = var.input_vmcx
+  secondary_iso_images = [var.cidata_iso]
+
+  # Generation 2 = UEFI, required for cloud images
+  generation = 2
+
+  # cloud-init handles boot; no PXE / boot_command needed
+  boot_wait = "60s"
+
+  # SSH credentials injected by cloud-init
+  communicator     = "ssh"
+  ssh_username     = "vagrant"
+  ssh_password     = "vagrant"
+  ssh_timeout      = "20m"
 
   headless         = true
-  shutdown_command = "echo vagrant | sudo -S shutdown -h now"
+  skip_compaction = false
+  shutdown_command = "echo 'vagrant' | sudo -S shutdown -P now"
 
-  # Packer writes output VM files here; the post-processor then packages them.
-  output_directory = "tmp/output-${var.os_name}"
+  output_directory = "output-hyperv-${var.os_name}"
 
-  vboxmanage = [
-    ["modifyvm", "{{.Name}}", "--memory", "${var.memory}"],
-    ["modifyvm", "{{.Name}}", "--cpus",   "${var.cpus}"],
-    ["storagectl",    "{{.Name}}", "--name", "SATA", "--portcount", "4"],
-    ["storageattach", "{{.Name}}", "--storagectl", "SATA",
-      "--port", "1", "--device", "0",
-      "--type", "dvddrive", "--medium", "${var.cidata_iso}"
-    ],
-  ]
+  enable_secure_boot    = false
+  enable_dynamic_memory = false
 }
 
 # ---------------------------------------------------------------------------
-# Build steps
+# Build
 # ---------------------------------------------------------------------------
 build {
-  sources = ["source.virtualbox-ovf.box"]
+  sources = ["source.hyperv-vmcx.box"]
 
   # 1. OS-specific: install packages, enable services
   provisioner "shell" {
@@ -121,7 +135,8 @@ build {
 
   # Package the VM as a .box file
   post-processor "vagrant" {
-    output               = "boxes/${var.os_name}-${var.version}-virtualbox.box"
-    vagrantfile_template = "os/${var.os_name}.Vagrantfile"
+    output               = "boxes/${var.os_name}-${var.version}-hyperv.box"
+    vagrantfile_template = "os/${var.os_name}-hyperv.Vagrantfile"
+    provider_override    = "hyperv"
   }
 }

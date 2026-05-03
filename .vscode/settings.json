@@ -5,17 +5,24 @@
     "cpus",
     "createvm",
     "gecos",
+    "hyperv",
     "IMAPI",
     "modifyvm",
     "NOPASSWD",
+    "NTFS",
     "ostype",
+    "OVMF",
     "pkrvars",
     "prereqs",
     "pwauth",
     "qcow",
     "tmpvm",
     "Trixie",
+    "UEFI",
     "unregistervm",
-    "vboxusers"
+    "vboxusers",
+    "vhdx",
+    "virtio",
+    "vmcx"
   ]
 }
