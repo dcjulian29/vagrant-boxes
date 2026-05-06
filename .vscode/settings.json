@@ -7,6 +7,9 @@
     "gecos",
     "hyperv",
     "IMAPI",
+    "libguestfs",
+    "libvirtd",
+    "mkisofs",
     "modifyvm",
     "NOPASSWD",
     "NTFS",
@@ -22,7 +25,12 @@
     "unregistervm",
     "vboxusers",
     "vhdx",
+    "virt",
     "virtio",
-    "vmcx"
+    "virtlockd",
+    "virtlogd",
+    "virtqemud",
+    "vmcx",
+    "xorriso"
   ]
 }

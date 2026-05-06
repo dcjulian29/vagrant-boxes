@@ -2,11 +2,11 @@
 # build.ps1 - Build Vagrant boxes locally (Windows).
 #
 # Usage:
-#   .\build.ps1                                     Build all OSes (Hyper-V)
-#   .\build.ps1 -OS debian-13                       Build a single OS
+#   .\build.ps1                                       Build all OSes (Hyper-V)
+#   .\build.ps1 -OS debian-13                         Build a single OS
 #   .\build.ps1 -OS debian-13 -Version 13.1.20260428  Explicit version
-#   .\build.ps1 -Provider virtualbox                Build VirtualBox boxes
-#   .\build.ps1 -Provider hyperv                    Build Hyper-V boxes (default)
+#   .\build.ps1 -Provider virtualbox                  Build VirtualBox boxes
+#   .\build.ps1 -Provider hyperv                      Build Hyper-V boxes (default)
 #
 # The version defaults to today's date (yyyyMMdd) when not supplied.
 # Converted VHDXs/OVAs and the cloud-init ISO are cached in tmp\ - delete the
@@ -16,7 +16,7 @@ param(
   [string]$OS = "all",
   [string]$Version = (Get-Date -Format "yyyyMMdd"),
   [ValidateSet("hyperv", "virtualbox")]
-  [string]$Provider = "hyperv"
+  [string]$Provider = "virtualbox"
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,8 +66,8 @@ function Resolve-ToolPaths {
 function Test-Prerequisites {
   $missing = @()
 
-  if (-not (Get-Command packer        -ErrorAction SilentlyContinue)) { $missing += "packer      -> choco install packer" }
-  if (-not (Get-Command qemu-img      -ErrorAction SilentlyContinue)) { $missing += "qemu-img    -> choco install qemu" }
+  if (-not (Get-Command packer    -ErrorAction SilentlyContinue)) { $missing += "packer      -> choco install packer" }
+  if (-not (Get-Command qemu-img  -ErrorAction SilentlyContinue)) { $missing += "qemu-img    -> choco install qemu" }
 
   if ($Provider -eq "virtualbox") {
     if (-not (Get-Command VBoxManage -ErrorAction SilentlyContinue)) { $missing += "VBoxManage  -> choco install virtualbox" }
@@ -84,27 +84,22 @@ function Test-Prerequisites {
 }
 
 function Get-HyperVDaemonsInstallCmd {
-    param([string]$Name)
+  param([string]$Name)
 
-    switch ($Name) {
-        "debian-13" {
-            return "sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y hyperv-daemons"
-        }
-        "almalinux-10" {
-            return "sudo dnf makecache -q && sudo dnf install -y hyperv-daemons"
-        }
-        default { throw "No hyperv-daemons install command defined for OS: $Name" }
+  switch ($Name) {
+    "debian-13" {
+      return "sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y hyperv-daemons"
     }
+    "almalinux-10" {
+      return "sudo dnf makecache -q && sudo dnf install -y hyperv-daemons"
+    }
+    default { throw "No hyperv-daemons install command defined for OS: $Name" }
+  }
 }
 
 # ---- Cloud-init seed ISO creation -------------------------------------------
 function New-CloudInitISO {
   param([string]$SourceDir, [string]$OutputPath)
-
-  if (Test-Path $OutputPath) {
-    Write-Host "==> Using cached cloud-init ISO: $OutputPath"
-    return
-  }
 
   Write-Host "==> Creating cloud-init seed ISO..."
 
@@ -188,28 +183,19 @@ public class ComIStreamWrapper : Stream {
 function Invoke-PrepareImage {
   param([string]$Name)
 
-  $url = $CloudImgUrl[$Name]
+  $url   = $CloudImgUrl[$Name]
   $qcow2 = "tmp\$Name.qcow2"
 
-  New-Item -ItemType Directory -Force -Path "tmp" | Out-Null
+  Write-Host ""
+  Write-Host "==> [$Name] Downloading cloud image..."
+  Write-Host "    $url"
+  curl.exe -fL --progress-bar $url -o $qcow2
+
 
   if ($Provider -eq "hyperv") {
     $vmcxDir = "tmp\$Name-vmcx"
-
-    if (Test-Path $vmcxDir) {
-      Write-Host "==> [$Name] Cached VMCX export found - skipping download."
-      Write-Host "    Delete $vmcxDir to force a fresh download."
-      return
-    }
-
-    $qcow2   = "tmp\$Name.qcow2"
-    $vhdx    = "tmp\$Name.vhdx"
+    $vhdx = "tmp\$Name.vhdx"
     $tmpVm   = "$Name-prep"
-
-    Write-Host ""
-    Write-Host "==> [$Name] Downloading cloud image..."
-    Write-Host "    $url"
-    curl.exe -fL --progress-bar $url -o $qcow2
 
     Write-Host "==> [$Name] Converting qcow2 -> VHDX..."
     qemu-img convert -p -f qcow2 -O vhdx -o subformat=dynamic $qcow2 $vhdx
@@ -222,14 +208,21 @@ function Invoke-PrepareImage {
     # qemu-img produces NTFS sparse files; Hyper-V requires non-sparse VHDXs.
     Write-Host "==> [$Name] Materializing VHDX (removing NTFS sparse attribute)..."
     $vhdxFull = "${vhdx}.full"
+
     try {
-        $srcStream = [System.IO.File]::OpenRead($vhdx)
-        $dstStream = [System.IO.File]::Create($vhdxFull)
-        $srcStream.CopyTo($dstStream)
+      $srcStream = [System.IO.File]::OpenRead("$PSScriptRoot\$vhdx")
+      $dstStream = [System.IO.File]::Create("$PSScriptRoot\$vhdxFull")
+      $srcStream.CopyTo($dstStream)
     } finally {
-        if ($null -ne $srcStream) { $srcStream.Dispose() }
-        if ($null -ne $dstStream) { $dstStream.Dispose() }
+      if ($null -ne $srcStream) {
+        $srcStream.Dispose()
+      }
+
+      if ($null -ne $dstStream) {
+        $dstStream.Dispose()
+      }
     }
+
     Remove-Item $vhdx -Force
     Rename-Item $vhdxFull (Split-Path $vhdx -Leaf)
 
@@ -238,116 +231,150 @@ function Invoke-PrepareImage {
 
     Write-Host "==> [$Name] VHDX ready: $absVhdx"
 
-    # ---- Vagrant insecure key (needed to SSH into prep VM) ----
+    # ---- Vagrant insecure key (needed to SSH into prep VM) ------------------
     $keyPath = Join-Path $absTmpDir "vagrant_insecure_key"
-    if (-not (Test-Path $keyPath)) {
-      Write-Host "==> [$Name] Downloading vagrant insecure private key..."
-      curl.exe -fsSL -o $keyPath "https://raw.githubusercontent.com/hashicorp/vagrant/main/keys/vagrant"
-      icacls $keyPath /inheritance:r          | Out-Null
-      icacls $keyPath /grant:r "${env:USERNAME}:(R)" | Out-Null
-    }
 
-    Write-Host "==> [$Name] Creating temporary Hyper-V VM..."
+    Write-Host "==> [$Name] Downloading vagrant insecure private key..."
+    curl.exe -fsSL -o $keyPath "https://raw.githubusercontent.com/hashicorp/vagrant/main/keys/vagrant"
 
-    # Clean up any leftover temp VM from a previous failed run
-    $null = Stop-VM  -Name $tmpVm -TurnOff -Force  -ErrorAction SilentlyContinue
-    $null = Remove-VM -Name $tmpVm -Force -ErrorAction SilentlyContinue
+    icacls $keyPath /inheritance:r | Out-Null
+    icacls $keyPath /grant:r "${env:USERNAME}:(R)" | Out-Null
 
-    New-VM -Name $tmpVm -Generation 2 -VHDPath $absVhdx -MemoryStartupBytes 1GB `
-      -SwitchName "Default Switch" | Out-Null
-    Set-VM -Name $tmpVm -AutomaticCheckpointsEnabled $false
-    Set-VMFirmware  -VMName $tmpVm -EnableSecureBoot Off
-    Set-VMProcessor -VMName $tmpVm -Count 2
-    Set-VMMemory    -VMName $tmpVm -DynamicMemoryEnabled $false
-    Add-VMDvdDrive  -VMName $tmpVm -Path $CidataIso
+    try {
+      Write-Host "==> [$Name] Creating temporary Hyper-V VM..."
 
-    Write-Host "==> [$Name] Starting temp VM to install hyperv-daemons..."
-    Start-VM -Name $tmpVm | Out-Null
+      # Clean up any leftover temp VM from a previous failed run
+      $null = Stop-VM  -Name $tmpVm -TurnOff -Force  -ErrorAction SilentlyContinue
+      $null = Remove-VM -Name $tmpVm -Force -ErrorAction SilentlyContinue
 
-    Start-Sleep -Seconds 5
+      New-VM -Name $tmpVm -Generation 2 -VHDPath $absVhdx -MemoryStartupBytes 1GB `
+        -SwitchName "Default Switch" | Out-Null
 
-    $vmMac       = (Get-VM $tmpVm | Get-VMNetworkAdapter).MacAddress
-    $formattedMac = ($vmMac -split '(.{2})' -ne '') -join "-"
+      Set-VM          -Name $tmpVm -AutomaticCheckpointsEnabled $false
+      Set-VMFirmware  -VMName $tmpVm -EnableSecureBoot Off
+      Set-VMProcessor -VMName $tmpVm -Count 2
+      Set-VMMemory    -VMName $tmpVm -DynamicMemoryEnabled $false
+      Add-VMDvdDrive  -VMName $tmpVm -Path $CidataIso
 
-    Write-Host "==> [$Name] Waiting for VM to obtain an IP (MAC: $formattedMac)..."
-    $vmIP  = $null
-    $until = [DateTime]::Now.AddMinutes(5)
-    while ([DateTime]::Now -lt $until) {
-      $n = Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-            Where-Object { $_.LinkLayerAddress -eq $formattedMac -and $_.State -ne 'Unreachable' }
-      if ($n) { $vmIP = $n.IPAddress; break }
+      $sshOpts = @("-i", $keyPath,
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+        "-o", "ConnectTimeout=10")
+
+      Write-Host "==> [$Name] Starting temp VM to install hyperv-daemons..."
+      Start-VM -Name $tmpVm | Out-Null
+
       Start-Sleep -Seconds 5
+
+      $vmMac       = (Get-VM $tmpVm | Get-VMNetworkAdapter).MacAddress
+      $formattedMac = ($vmMac -split '(.{2})' -ne '') -join "-"
+
+      Write-Host "==> [$Name] Waiting for VM to obtain an IP (MAC: $formattedMac)..."
+      $vmIP  = $null
+      $until = [DateTime]::Now.AddMinutes(5)
+
+      while ([DateTime]::Now -lt $until) {
+        $n = Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+              Where-Object { $_.LinkLayerAddress -eq $formattedMac -and $_.State -ne 'Unreachable' }
+        if ($n) { $vmIP = $n.IPAddress; break }
+        Start-Sleep -Seconds 5
+      }
+
+      if (-not $vmIP) {
+        throw "Timed out waiting for VM IP (5 min)"
+      }
+
+      Write-Host "==> [$Name] VM IP: $vmIP"
+
+      Write-Host "==> [$Name] Waiting for SSH port to open on $vmIP..."
+      $until = [DateTime]::Now.AddMinutes(5)
+
+      while ([DateTime]::Now -lt $until) {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        try   {
+          $tcp.Connect($vmIP, 22)
+          if ($tcp.Connected) {
+            break
+          }
+        }
+        catch { }
+        finally {
+          $tcp.Dispose()
+        }
+
+        Start-Sleep -Seconds 5
+      }
+
+      Write-Host "==> [$Name] Waiting for vagrant SSH login (cloud-init completing)..."
+      $until = [DateTime]::Now.AddMinutes(5)
+
+      while ([DateTime]::Now -lt $until) {
+        $null = ssh @sshOpts "vagrant@$vmIP" "echo ready" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+          break
+        }
+
+        Start-Sleep -Seconds 10
+      }
+
+      if ($LASTEXITCODE -ne 0) {
+        throw "Timed out waiting for vagrant login on $vmIP"
+      }
+
+      Write-Host "==> [$Name] Installing hyperv-daemons..."
+      $installCmd = Get-HyperVDaemonsInstallCmd -Name $Name
+      ssh @sshOpts "vagrant@$vmIP" $installCmd
+      if ($LASTEXITCODE -ne 0) {
+        throw "hyperv-daemons install failed"
+      }
+
+      Write-Host "==> [$Name] Resetting cloud-init state..."
+      ssh @sshOpts "vagrant@$vmIP" "sudo cloud-init clean --machine-id"
+
+      Write-Host "==> [$Name] Shutting down temp VM..."
+      ssh @sshOpts "vagrant@$vmIP" "sudo shutdown -h now" 2>&1 | Out-Null
+      $until = [DateTime]::Now.AddMinutes(3)
+
+      while ([DateTime]::Now -lt $until -and (Get-VM $tmpVm).State -ne 'Off') {
+        Start-Sleep -Seconds 5
+      }
+
+      if ((Get-VM $tmpVm).State -ne 'Off') {
+        Stop-VM -Name $tmpVm -TurnOff -Force
+      }
+
+      Get-VMDvdDrive -VMName $tmpVm | Remove-VMDvdDrive -ErrorAction SilentlyContinue
+
+      Write-Host "==> [$Name] Exporting VM to $vmcxDir..."
+      Export-VM -Name $tmpVm -Path $absTmpDir
+      Rename-Item -Path (Join-Path $absTmpDir $tmpVm) -NewName "$Name-vmcx"
+
+      Write-Host "==> [$Name] Removing temporary VM and source VHDX..."
+      Remove-VM -Name $tmpVm -Force
+
+      icacls $keyPath /reset | Out-Null
+
+      Remove-Item $keyPath -Force -ErrorAction SilentlyContinue
+      Remove-Item $vhdx    -Force -ErrorAction SilentlyContinue
+
+      Write-Host "==> [$Name] VMCX export ready: $vmcxDir"
+    } catch {
+      # Clean up the half-built prep VM so the next run starts fresh
+      Write-Host "==> [$Name] Prep failed - cleaning up temp VM and artifacts..." -ForegroundColor Yellow
+      $null = Stop-VM   -Name $tmpVm -TurnOff -Force -ErrorAction SilentlyContinue
+      $null = Remove-VM -Name $tmpVm -Force          -ErrorAction SilentlyContinue
+
+      icacls $keyPath /reset | Out-Null
+
+      Remove-Item $keyPath       -Force -ErrorAction SilentlyContinue
+      Remove-Item $vhdx          -Force -ErrorAction SilentlyContinue
+      Remove-Item "${vhdx}.full" -Force -ErrorAction SilentlyContinue
+      throw
     }
-
-    if (-not $vmIP) { throw "Timed out waiting for VM IP (5 min)" }
-
-    Write-Host "==> [$Name] VM IP: $vmIP"
-
-    Write-Host "==> [$Name] Waiting for SSH port to open on $vmIP..."
-    $until = [DateTime]::Now.AddMinutes(5)
-    while ([DateTime]::Now -lt $until) {
-      $tcp = New-Object System.Net.Sockets.TcpClient
-      try   { $tcp.Connect($vmIP, 22); if ($tcp.Connected) { break } }
-      catch { }
-      finally { $tcp.Dispose() }
-      Start-Sleep -Seconds 5
-    }
-
-    Write-Host "==> [$Name] Waiting for vagrant SSH login (cloud-init completing)..."
-    $sshOpts = @("-i", $keyPath, "-o", "StrictHostKeyChecking=no",
-                  "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10")
-    $until = [DateTime]::Now.AddMinutes(5)
-    while ([DateTime]::Now -lt $until) {
-      $out = ssh @sshOpts "vagrant@$vmIP" "echo ready" 2>&1
-      if ($LASTEXITCODE -eq 0) { break }
-      Start-Sleep -Seconds 10
-    }
-
-    if ($LASTEXITCODE -ne 0) { throw "Timed out waiting for vagrant login on $vmIP" }
-
-    Write-Host "==> [$Name] Installing hyperv-daemons..."
-
-    $installCmd = Get-HyperVDaemonsInstallCmd -Name $Name
-    ssh @sshOpts "vagrant@$vmIP" $installCmd
-    if ($LASTEXITCODE -ne 0) { throw "hyperv-daemons install failed" }
-
-    Write-Host "==> [$Name] Resetting cloud-init state..."
-    ssh @sshOpts "vagrant@$vmIP" "sudo cloud-init clean --machine-id"
-
-    Write-Host "==> [$Name] Shutting down temp VM..."
-    ssh @sshOpts "vagrant@$vmIP" "sudo shutdown -h now" 2>&1 | Out-Null
-    $until = [DateTime]::Now.AddMinutes(3)
-    while ([DateTime]::Now -lt $until -and (Get-VM $tmpVm).State -ne 'Off') {
-      Start-Sleep -Seconds 5
-    }
-
-    if ((Get-VM $tmpVm).State -ne 'Off') { Stop-VM -Name $tmpVm -TurnOff -Force }
-
-    Get-VMDvdDrive -VMName $tmpVm | Remove-VMDvdDrive -ErrorAction SilentlyContinue
-
-    Write-Host "==> [$Name] Exporting VM to $vmcxDir..."
-    Export-VM -Name $tmpVm -Path $absTmpDir
-    Rename-Item -Path (Join-Path $absTmpDir $tmpVm) -NewName "$Name-vmcx"
-
-    Write-Host "==> [$Name] Removing temporary VM and source VHDX..."
-    Remove-VM -Name $tmpVm -Force
-    Remove-Item $vhdx -Force -ErrorAction SilentlyContinue
-
-    Write-Host "==> [$Name] VMCX export ready: $vmcxDir"
   } else {
-    $vmdk = "tmp\$Name.vmdk"
     $ova = "tmp\$Name.ova"
-
-    if (Test-Path $ova) {
-      Write-Host "==> [$Name] Cached OVA found - skipping download."
-      Write-Host "    Delete $ova to force a fresh download."
-      return
-    }
-
-    Write-Host ""
-    Write-Host "==> [$Name] Downloading cloud image..."
-    Write-Host "    $url"
-    curl.exe -fL --progress-bar $url -o $qcow2
+    $vmdk = "tmp\$Name.vmdk"
 
     Write-Host "==> [$Name] Converting qcow2 -> VMDK..."
     qemu-img convert -p -f qcow2 -O vmdk $qcow2 $vmdk
@@ -384,11 +411,14 @@ function Invoke-BuildBox {
     $boxSuffix = "virtualbox"
   }
 
+  $packerOutputDir = "tmp\output-$Name-$boxSuffix"
+
   Write-Host ""
   Write-Host "------------------------------------------------------------"
   Write-Host " OS       : $Name"
   Write-Host " Provider : $Provider"
   Write-Host " Version  : $Version"
+  Write-Host " Build    : $packerOutputDir"
   Write-Host " Output   : boxes\$Name-$Version-$boxSuffix.box"
   Write-Host "------------------------------------------------------------"
 
@@ -399,11 +429,13 @@ function Invoke-BuildBox {
   if ($Provider -eq "hyperv") {
     Stop-VM -Name $Name -TurnOff -Force -ErrorAction SilentlyContinue | Out-Null
     Start-Sleep -Seconds 2
+
     Remove-VM -Name $Name -Force -ErrorAction SilentlyContinue | Out-Null
     Start-Sleep -Seconds 5
   } else {
     $null = VBoxManage controlvm "$Name-packer" poweroff 2>&1
     Start-Sleep -Seconds 2
+
     $null = VBoxManage unregistervm "$Name-packer" --delete 2>&1
     Start-Sleep -Seconds 5
   }
@@ -419,14 +451,19 @@ function Invoke-BuildBox {
   Write-Host "==> [$Name] Running Packer build ($Provider)..."
   Write-Host "    cidata_iso = $CidataIso"
 
-  packer build `
-    -var "version=$Version" `
-    -var "cidata_iso=$CidataIso" `
-    -var-file="os/$Name.pkrvars.hcl" `
-    $template
-
-  if ($LASTEXITCODE -ne 0) {
-    throw "Packer build failed with exit code $LASTEXITCODE"
+  try {
+    packer build `
+      -var "version=$Version" `
+      -var "cidata_iso=$CidataIso" `
+      -var-file="os/$Name.pkrvars.hcl" `
+      $template
+    if ($LASTEXITCODE -ne 0) {
+      throw "Packer build failed with exit code $LASTEXITCODE"
+    }
+  } finally {
+    Remove-Item $packerOutputDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $CidataIso       -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item "tmp\*.ova"      -Recurse -Force -ErrorAction SilentlyContinue
   }
 
   Write-Host ""
@@ -438,7 +475,12 @@ function Invoke-BuildBox {
 Resolve-ToolPaths
 Test-Prerequisites
 
+if (Test-Path "tmp") {
+  Remove-Item -Path "tmp" -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 New-Item -ItemType Directory -Force -Path "tmp" | Out-Null
+
 New-CloudInitISO -SourceDir "cloud-init" -OutputPath "tmp\cidata.iso"
 
 $cidataIsoPath = Join-Path (Get-Location).Path "tmp\cidata.iso"
@@ -482,5 +524,7 @@ if ($failed.Count -gt 0) {
   Write-Host ""
   Write-Host "Generated boxes:"
 
-  $BuildList | ForEach-Object { Write-Host "  boxes\$_-$Version-$Provider.box" }
+  $BuildList | ForEach-Object {
+    Write-Host "  boxes\$_-$Version-$Provider.box"
+  }
 }

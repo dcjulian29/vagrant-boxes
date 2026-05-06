@@ -12,7 +12,7 @@ packer {
     }
     vagrant = {
       version = ">= 1.1.0"
-      source = "github.com/hashicorp/vagrant"
+      source  = "github.com/hashicorp/vagrant"
     }
   }
 }
@@ -82,12 +82,12 @@ source "virtualbox-ovf" "box" {
   shutdown_command = "echo vagrant | sudo -S shutdown -h now"
 
   # Packer writes output VM files here; the post-processor then packages them.
-  output_directory = "tmp/output-${var.os_name}"
+  output_directory = "tmp/output-${var.os_name}-virtualbox"
 
   vboxmanage = [
     ["modifyvm", "{{.Name}}", "--memory", "${var.memory}"],
     ["modifyvm", "{{.Name}}", "--cpus",   "${var.cpus}"],
-    ["storagectl",    "{{.Name}}", "--name", "SATA", "--portcount", "4"],
+    ["storagectl", "{{.Name}}", "--name", "SATA", "--portcount", "4"],
     ["storageattach", "{{.Name}}", "--storagectl", "SATA",
       "--port", "1", "--device", "0",
       "--type", "dvddrive", "--medium", "${var.cidata_iso}"

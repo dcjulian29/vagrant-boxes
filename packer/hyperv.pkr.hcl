@@ -79,10 +79,10 @@ variable "switch_name" {
 # Source
 # ---------------------------------------------------------------------------
 source "hyperv-vmcx" "box" {
-  vm_name      = var.vm_name
-  cpus         = var.cpus
-  memory       = var.memory
-  switch_name  = var.switch_name
+  vm_name     = var.vm_name
+  cpus        = var.cpus
+  memory      = var.memory
+  switch_name = var.switch_name
 
   clone_from_vmcx_path = var.input_vmcx
   secondary_iso_images = [var.cidata_iso]
@@ -94,16 +94,16 @@ source "hyperv-vmcx" "box" {
   boot_wait = "60s"
 
   # SSH credentials injected by cloud-init
-  communicator     = "ssh"
-  ssh_username     = "vagrant"
-  ssh_password     = "vagrant"
-  ssh_timeout      = "20m"
+  communicator = "ssh"
+  ssh_username = "vagrant"
+  ssh_password = "vagrant"
+  ssh_timeout  = "20m"
 
   headless         = true
-  skip_compaction = false
+  skip_compaction  = false
   shutdown_command = "echo 'vagrant' | sudo -S shutdown -P now"
 
-  output_directory = "output-hyperv-${var.os_name}"
+  output_directory = "tmp/output-${var.os_name}-hyperv"
 
   enable_secure_boot    = false
   enable_dynamic_memory = false
