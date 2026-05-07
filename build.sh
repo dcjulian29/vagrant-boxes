@@ -4,9 +4,11 @@
 # Compatible with bash 3.2+ for macOS GitHub Actions runner compatibility.
 #
 # Usage:
-#   ./build.sh                        Build all registered OSes
-#   ./build.sh debian-13              Build a single OS
+#   ./build.sh                          Build all registered OSes
+#   ./build.sh debian-13                Build a single OS
 #   ./build.sh debian-13 13.1.20260428  Build with an explicit version
+#   ./build.sh libvirt                  Build all OSes (libvirt)
+#   ./build.sh libvirt debian-13        Build a single OS (libvirt)
 #
 # The version defaults to today's date (YYYYMMDD) when not supplied.
 # Converted OVAs and the cloud-init ISO are cached in tmp/ - delete the
@@ -49,34 +51,6 @@ get_vbox_os_type() {
   esac
 }
 
-# =============================================================================
-
-case "${1:-}" in
-  virtualbox|libvirt)
-    PROVIDER="${1}"
-    OS_ARG="${2:-all}"
-    VERSION="${3:-$(date +%Y%m%d)}"
-    ;;
-  *)
-    PROVIDER="virtualbox"
-    OS_ARG="${1:-all}"
-    VERSION="${2:-$(date +%Y%m%d)}"
-    ;;
-esac
-
-# ---- Resolve build list -----------------------------------------------------
-if [ "$OS_ARG" = "all" ]; then
-  # shellcheck disable=SC2206
-  BUILD_LIST=($KNOWN_OSES)
-else
-  if ! get_cloud_img_url "$OS_ARG" > /dev/null 2>&1; then
-    echo "ERROR: Unknown OS '$OS_ARG'."
-    echo "       Available: $KNOWN_OSES"
-    exit 1
-  fi
-  BUILD_LIST=("$OS_ARG")
-fi
-
 # ---- KVM module management --------------------------------------------------
 # VirtualBox and KVM cannot share VT-x/AMD-V. When KVM modules are loaded,
 # they are disabled for the duration of the build and restored on exit -
@@ -103,8 +77,6 @@ disable_kvm() {
   [ -z "$KVM_MODULE" ] && return 0
   echo "==> Disabling KVM ($KVM_MODULE) for VirtualBox build..."
 
-  # libvirtd/virtqemud holds /dev/kvm open even with no VMs running.
-  # Stop it temporarily so the modules can be unloaded.
   for svc in virtqemud libvirtd; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
       echo "==> Stopping libvirt daemon ($svc) to release KVM modules..."
@@ -170,15 +142,9 @@ check_prereqs() {
 }
 
 # ---- Cloud-init seed ISO creation -------------------------------------------
-# Uses genisoimage (preferred), xorriso, or mkisofs - whichever is installed.
 create_cidata_iso() {
   local output="$1"
   local source_dir="$2"
-
-  if [ -f "$output" ]; then
-    echo "==> Using cached cloud-init ISO: $output"
-    return 0
-  fi
 
   echo "==> Creating cloud-init seed ISO..."
 
@@ -193,7 +159,7 @@ create_cidata_iso() {
   echo "==> Cloud-init seed ISO created: $output"
 }
 
-# ---- Prepare: download cloud image and convert to OVA -----------------------
+# ---- Prepare: download cloud image and convert to OVA for VirtualBox ---------
 prepare_image_virtualbox() {
   local name="$1"
   local url
@@ -204,14 +170,6 @@ prepare_image_virtualbox() {
   local qcow2="tmp/${name}.qcow2"
   local vmdk="tmp/${name}.vmdk"
   local ova="tmp/${name}.ova"
-
-  mkdir -p tmp
-
-  if [ -f "$ova" ]; then
-    echo "==> [$name] Cached OVA found - skipping download."
-    echo "    Delete $ova to force a fresh download."
-    return 0
-  fi
 
   echo ""
   echo "==> [$name] Downloading cloud image..."
@@ -237,7 +195,7 @@ prepare_image_virtualbox() {
   echo "==> [$name] OVA ready: $ova"
 }
 
-# ---- Build a single VirtualBox box -----------------------------------------------------
+# ---- Build a single VirtualBox box -------------------------------------------
 build_box_virtualbox() {
   local name="$1"
   local cidata_iso="$2"
@@ -257,11 +215,13 @@ build_box_virtualbox() {
   echo "==> [$name] Removing any leftover Packer VMs..."
   VBoxManage controlvm "${name}-packer" poweroff 2>/dev/null || true
   sleep 2
+
   VBoxManage unregistervm "${name}-packer" --delete 2>/dev/null || true
   sleep 5
 
   echo ""
   echo "==> [$name] Initializing Packer plugins..."
+
   packer init packer/virtualbox.pkr.hcl
   rc=$?
   if [ $rc -ne 0 ]; then
@@ -269,7 +229,7 @@ build_box_virtualbox() {
     return $rc
   fi
 
-  echo "==> [$name] Running Packer build..."
+  echo "==> [$name] Running Packer build (virtualbox)..."
   echo "    cidata_iso = $cidata_iso"
 
   packer build \
@@ -294,14 +254,6 @@ prepare_image_libvirt() {
   url="$(get_cloud_img_url "$name")"
 
   local qcow2="tmp/${name}.qcow2"
-
-  mkdir -p tmp
-
-  if [ -f "$qcow2" ]; then
-    echo "==> [$name] Cached qcow2 found - skipping download."
-    echo "    Delete $qcow2 to force a fresh download."
-    return 0
-  fi
 
   echo ""
   echo "==> [$name] Downloading cloud image..."
@@ -336,6 +288,7 @@ build_box_libvirt() {
 
   echo ""
   echo "==> [$name] Initializing Packer plugins..."
+
   packer init packer/libvirt.pkr.hcl
   rc=$?
   if [ $rc -ne 0 ]; then
@@ -344,9 +297,7 @@ build_box_libvirt() {
   fi
 
   echo "==> [$name] Running Packer build (libvirt)..."
-  echo "    input_qcow2 = $qcow2_path"
   echo "    cidata_iso  = $cidata_iso"
-
 
   packer build \
     -var "version=${VERSION}" \
@@ -354,9 +305,7 @@ build_box_libvirt() {
     -var "cidata_iso=${cidata_iso}" \
     -var-file="os/${name}.pkrvars.hcl" \
     packer/libvirt.pkr.hcl
-
   rc=$?
-
   if [ $rc -ne 0 ]; then
     echo "ERROR: [$name] Packer build failed (exit code $rc)"
     return $rc
@@ -378,6 +327,31 @@ run_build() {
 
 # =============================================================================
 
+case "${1:-}" in
+  virtualbox|libvirt)
+    PROVIDER="${1}"
+    OS_ARG="${2:-all}"
+    VERSION="${3:-$(date +%Y%m%d)}"
+    ;;
+  *)
+    PROVIDER="virtualbox"
+    OS_ARG="${1:-all}"
+    VERSION="${2:-$(date +%Y%m%d)}"
+    ;;
+esac
+
+if [ "$OS_ARG" = "all" ]; then
+  # shellcheck disable=SC2206
+  BUILD_LIST=($KNOWN_OSES)
+else
+  if ! get_cloud_img_url "$OS_ARG" > /dev/null 2>&1; then
+    echo "ERROR: Unknown OS '$OS_ARG'."
+    echo "       Available: $KNOWN_OSES"
+    exit 1
+  fi
+  BUILD_LIST=("$OS_ARG")
+fi
+
 check_prereqs
 detect_kvm
 
@@ -388,7 +362,9 @@ if [ "$PROVIDER" = "virtualbox" ]; then
   disable_kvm
 fi
 
+rm -rf tmp/
 mkdir -p tmp
+
 CIDATA_ISO="$(pwd)/tmp/cidata.iso"
 create_cidata_iso "$CIDATA_ISO" "cloud-init"
 
