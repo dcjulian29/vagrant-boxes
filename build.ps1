@@ -2,19 +2,14 @@
 # build.ps1 - Build Vagrant boxes locally (Windows).
 #
 # Usage:
-#   .\build.ps1                                       Build all OSes (Hyper-V)
-#   .\build.ps1 -OS debian-13                         Build a single OS
-#   .\build.ps1 -OS debian-13 -Version 13.1.20260428  Explicit version
-#   .\build.ps1 -Provider virtualbox                  Build VirtualBox boxes
-#   .\build.ps1 -Provider hyperv                      Build Hyper-V boxes (default)
-#
-# The version defaults to today's date (yyyyMMdd) when not supplied.
-# Converted VHDXs/OVAs and the cloud-init ISO are cached in tmp\ - delete the
-# relevant file to force a refresh.
+#   .\build.ps1                                   Build all OSes for the default provider
+#   .\build.ps1 -OS debian-13                     Build a single OS for the default provider
+#   .\build.ps1 -OS debian-13 -Provider hyperv    Build a single OS for the Hyper-V provider
+#   .\build.ps1 -Provider virtualbox              Build VirtualBox boxes (default)
+#   .\build.ps1 -Provider hyperv                  Build Hyper-V boxes
 # =============================================================================
 param(
   [string]$OS = "all",
-  [string]$Version = (Get-Date -Format "yyyyMMdd"),
   [ValidateSet("hyperv", "virtualbox")]
   [string]$Provider = "virtualbox"
 )
@@ -47,6 +42,20 @@ $VBoxOsType = @{
 $OsOrder = @("debian-13", "almalinux-10")
 
 # =============================================================================
+
+function Get-VersionForOS([string]$OsName) {
+  [void]($OSName -match '-(\d+)$')
+  $major = $Matches[1]
+
+  if (-not $major) {
+    throw "Cannot derive major version from OS name: $OsName"
+  }
+
+  $datePart = Get-Date -Format "yyyyMMdd"
+  $patch = if ($env:GITHUB_RUN_NUMBER) { $env:GITHUB_RUN_NUMBER } else { "0" }
+
+  return "$major.$datePart.$patch"
+}
 
 function Resolve-ToolPaths {
   $searchDirs = @(
@@ -400,7 +409,7 @@ function Invoke-PrepareImage {
 }
 
 function Invoke-BuildBox {
-  param([string]$Name, [string]$CidataIso)
+  param([string]$Name, [string]$CidataIso, [string]$Version)
 
   if ($Provider -eq "hyperv") {
     $template = "packer/hyperv.pkr.hcl"
@@ -411,14 +420,11 @@ function Invoke-BuildBox {
     $boxSuffix = "virtualbox"
   }
 
-  $packerOutputDir = "tmp\output-$Name-$boxSuffix"
-
   Write-Host ""
   Write-Host "------------------------------------------------------------"
   Write-Host " OS       : $Name"
   Write-Host " Provider : $Provider"
   Write-Host " Version  : $Version"
-  Write-Host " Build    : $packerOutputDir"
   Write-Host " Output   : boxes\$Name-$Version-$boxSuffix.box"
   Write-Host "------------------------------------------------------------"
 
@@ -461,8 +467,6 @@ function Invoke-BuildBox {
       throw "Packer build failed with exit code $LASTEXITCODE"
     }
   } finally {
-    Remove-Item $packerOutputDir -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item $CidataIso       -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item "tmp\*.ova"      -Recurse -Force -ErrorAction SilentlyContinue
   }
 
@@ -496,19 +500,21 @@ if ($OS -eq "all") {
   $BuildList = @($OS)
 }
 
-Write-Host ""
-Write-Host "=== Vagrant Box Builder ($Provider) ==="
-Write-Host "Targets : $($BuildList -join ', ')"
-Write-Host "Version : $Version"
 
 $failed = [System.Collections.Generic.List[string]]::new()
 
 foreach ($osName in $BuildList) {
   try {
-    Invoke-BuildBox -Name $osName -CidataIso $cidataIsoPath
+    $version = Get-VersionForOS $osName
+
+    Write-Host ""
+    Write-Host "=== Vagrant Box Builder ($Provider) ==="
+    Write-Host "Target  : $osName"
+    Write-Host "Version : $version"
+
+    Invoke-BuildBox -Name $osName -CidataIso $cidataIsoPath -Version $version
     Write-Host "OK     : $osName" -ForegroundColor Green
-  }
-  catch {
+  } catch {
     Write-Host "FAILED : $osName $_" -ForegroundColor Red
     $failed.Add($osName)
   }
@@ -525,6 +531,6 @@ if ($failed.Count -gt 0) {
   Write-Host "Generated boxes:"
 
   $BuildList | ForEach-Object {
-    Write-Host "  boxes\$_-$Version-$Provider.box"
+    Write-Host "  boxes\$_-$version-$Provider.box"
   }
 }

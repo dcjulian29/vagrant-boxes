@@ -6,13 +6,8 @@
 # Usage:
 #   ./build.sh                          Build all registered OSes
 #   ./build.sh debian-13                Build a single OS
-#   ./build.sh debian-13 13.1.20260428  Build with an explicit version
 #   ./build.sh libvirt                  Build all OSes (libvirt)
 #   ./build.sh libvirt debian-13        Build a single OS (libvirt)
-#
-# The version defaults to today's date (YYYYMMDD) when not supplied.
-# Converted OVAs and the cloud-init ISO are cached in tmp/ - delete the
-# relevant file to force a refresh.
 # =============================================================================
 set -euo pipefail
 
@@ -28,6 +23,33 @@ set -euo pipefail
 #   6. Create scripts/<family>/setup.sh  (or reuse an existing family script)
 # =============================================================================
 KNOWN_OSES="debian-13 almalinux-10"
+
+get_os_major() {
+  # Extract trailing "-<digits>" from os_name (e.g. debian-13 -> 13)
+  if [[ "$1" =~ -([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  echo ""
+  return 1
+}
+
+version_for_os() {
+  local os_name="$1"
+  local major date_part patch
+
+  major="$(get_os_major "$os_name")"
+  date_part="$(date -u +%Y%m%d)"
+  patch="${GITHUB_RUN_NUMBER:-0}"   # local=0, CI can override
+
+  if [[ -z "$major" ]]; then
+    echo "ERROR: cannot derive major version from os name: $os_name" >&2
+    return 1
+  fi
+
+  echo "${major}.${date_part}.${patch}"
+}
 
 get_cloud_img_url() {
   case "$1" in
@@ -200,12 +222,15 @@ build_box_virtualbox() {
   local name="$1"
   local cidata_iso="$2"
   local rc
+  local version
+
+  version="$(version_for_os "$name")"
 
   echo ""
   echo "------------------------------------------------------------"
   echo "  OS      : $name"
-  echo "  Version : $VERSION"
-  echo "  Output  : boxes/${name}-${VERSION}-virtualbox.box"
+  echo "  Version : $version"
+  echo "  Output  : boxes/${name}-${version}-virtualbox.box"
   echo "------------------------------------------------------------"
 
   prepare_image_virtualbox "$name"
@@ -233,7 +258,7 @@ build_box_virtualbox() {
   echo "    cidata_iso = $cidata_iso"
 
   packer build \
-    -var "version=${VERSION}" \
+    -var "version=${version}" \
     -var "cidata_iso=${cidata_iso}" \
     -var-file="os/${name}.pkrvars.hcl" \
     packer/virtualbox.pkr.hcl
@@ -244,15 +269,13 @@ build_box_virtualbox() {
   fi
 
   echo ""
-  echo "==> [$name] Complete -> boxes/${name}-${VERSION}-virtualbox.box"
+  echo "==> [$name] Complete -> boxes/${name}-${version}-virtualbox.box"
 }
 
 # ---- Prepare: download cloud image (libvirt - qcow2 used directly) -----------
 prepare_image_libvirt() {
   local name="$1"
-  local url
-  url="$(get_cloud_img_url "$name")"
-
+  local url="$(get_cloud_img_url "$name")"
   local qcow2="tmp/${name}.qcow2"
 
   echo ""
@@ -268,13 +291,16 @@ build_box_libvirt() {
   local name="$1"
   local cidata_iso="$2"
   local rc
+  local version
+
+  version="$(version_for_os "$name")"
 
   echo ""
   echo "------------------------------------------------------------"
   echo "  OS       : $name"
   echo "  Provider : libvirt"
-  echo "  Version  : $VERSION"
-  echo "  Output   : boxes/${name}-${VERSION}-libvirt.box"
+  echo "  Version  : $version"
+  echo "  Output   : boxes/${name}-${version}-libvirt.box"
   echo "------------------------------------------------------------"
 
   prepare_image_libvirt "$name"
@@ -300,7 +326,7 @@ build_box_libvirt() {
   echo "    cidata_iso  = $cidata_iso"
 
   packer build \
-    -var "version=${VERSION}" \
+    -var "version=${version}" \
     -var "input_qcow2=${qcow2_path}" \
     -var "cidata_iso=${cidata_iso}" \
     -var-file="os/${name}.pkrvars.hcl" \
@@ -312,7 +338,7 @@ build_box_libvirt() {
   fi
 
   echo ""
-  echo "==> [$name] Complete -> boxes/${name}-${VERSION}-libvirt.box"
+  echo "==> [$name] Complete -> boxes/${name}-${version}-libvirt.box"
 }
 
 # ---- Dispatch to the correct build function for the active provider ---------
@@ -331,12 +357,10 @@ case "${1:-}" in
   virtualbox|libvirt)
     PROVIDER="${1}"
     OS_ARG="${2:-all}"
-    VERSION="${3:-$(date +%Y%m%d)}"
     ;;
   *)
     PROVIDER="virtualbox"
     OS_ARG="${1:-all}"
-    VERSION="${2:-$(date +%Y%m%d)}"
     ;;
 esac
 
@@ -371,7 +395,6 @@ create_cidata_iso "$CIDATA_ISO" "cloud-init"
 echo ""
 echo "=== Vagrant Box Builder ($PROVIDER) ==="
 echo "Targets : ${BUILD_LIST[*]}"
-echo "Version : $VERSION"
 
 failed=""
 for os_name in "${BUILD_LIST[@]}"; do
@@ -392,6 +415,7 @@ else
   echo ""
   echo "Generated boxes:"
   for os_name in "${BUILD_LIST[@]}"; do
-    echo "  boxes/${os_name}-${VERSION}-${PROVIDER}.box"
+    v="$(version_for_os "$os_name")"
+    echo "  boxes/${os_name}-${v}-${PROVIDER}.box"
   done
 fi
