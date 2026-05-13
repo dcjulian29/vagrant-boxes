@@ -1,5 +1,6 @@
 {
   "cSpell.words": [
+    "btmp",
     "cidata",
     "controlvm",
     "cpus",
@@ -31,6 +32,7 @@
     "virtlogd",
     "virtqemud",
     "vmcx",
+    "wtmp",
     "xorriso"
   ]
 }

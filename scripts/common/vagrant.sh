@@ -3,7 +3,7 @@
 # Runs on every OS after the OS-specific setup script.
 set -euo pipefail
 
-echo "==> [common] Configuring vagrant user..."
+echo "==> [vagrant] Setting up vagrant user SSH key"
 
 mkdir -pm 700 /home/vagrant/.ssh
 
@@ -15,7 +15,9 @@ curl -fsSL \
 chmod 600 /home/vagrant/.ssh/authorized_keys
 chown -R vagrant:vagrant /home/vagrant/.ssh
 
+echo "==> [vagrant] Configuring passwordless sudo for vagrant"
+
 echo "vagrant ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/vagrant
 chmod 440 /etc/sudoers.d/vagrant
 
-echo "==> [common] vagrant user configured."
+echo "==> [vagrant] vagrant user configured."
