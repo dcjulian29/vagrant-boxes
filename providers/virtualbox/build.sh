@@ -244,7 +244,8 @@ build_box_virtualbox() {
 check_prereqs
 detect_kvm
 
-trap 'enable_kvm' EXIT
+trap 'enable_kvm; find . -maxdepth 1 -name "*VBoxHeadless*.log" -exec mv {} tmp/ \; 2>/dev/null || true' EXIT
+
 disable_kvm
 
 cd "$REPO_BASE"
