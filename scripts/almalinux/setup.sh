@@ -3,15 +3,6 @@
 # Runs inside the VM after cloud-init has created the vagrant user.
 set -euo pipefail
 
-echo "==> [almalinux] Installing base packages..."
-dnf install -y \
-  openssh-server \
-  curl \
-  wget \
-  sudo \
-  bash-completion \
-  NetworkManager
-
 echo "==> [almalinux] Enabling services..."
 systemctl enable sshd
 systemctl enable NetworkManager

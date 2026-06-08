@@ -9,16 +9,6 @@ echo "==> [debian] Updating package lists and upgrading"
 apt-get update -y
 apt-get upgrade -y
 
-echo "==> [debian] Installing base packages..."
-apt-get install -y --no-install-recommends \
-  openssh-server \
-  curl \
-  wget \
-  sudo \
-  bash-completion \
-  dbus \
-  lsb-release
-
 echo "==> [debian] Enabling and starting SSH service..."
 systemctl enable ssh
 systemctl start  ssh || true
