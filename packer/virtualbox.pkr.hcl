@@ -87,6 +87,11 @@ source "virtualbox-ovf" "box" {
   vboxmanage = [
     ["modifyvm", "{{.Name}}", "--memory", "${var.memory}"],
     ["modifyvm", "{{.Name}}", "--cpus",   "${var.cpus}"],
+    ["modifyvm", "{{.Name}}", "--firmware", "efi"],
+    ["modifyvm", "{{.Name}}", "--chipset", "ich9"],
+    ["modifyvm", "{{.Name}}", "--ioapic", "on"],
+    ["modifyvm", "{{.Name}}", "--graphicscontroller", "vmsvga"],
+    ["modifyvm", "{{.Name}}", "--uartmode1", "disconnected"],
     ["storagectl", "{{.Name}}", "--name", "SATA", "--portcount", "4"],
     ["storageattach", "{{.Name}}", "--storagectl", "SATA",
       "--port", "1", "--device", "0",

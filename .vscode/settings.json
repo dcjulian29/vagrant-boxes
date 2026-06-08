@@ -10,6 +10,7 @@
     "iface",
     "ifname",
     "IMAPI",
+    "ioapic",
     "libguestfs",
     "libvirtd",
     "mkisofs",
@@ -26,6 +27,7 @@
     "qcow",
     "tmpvm",
     "Trixie",
+    "uartmode",
     "UEFI",
     "unregistervm",
     "vboxusers",
@@ -36,6 +38,7 @@
     "virtlogd",
     "virtqemud",
     "vmcx",
+    "vmsvga",
     "wtmp",
     "xorriso"
   ]
