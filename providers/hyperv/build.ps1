@@ -89,7 +89,7 @@ function Invoke-GuestNetworkConfig {
       ssh @SshOpts "vagrant@$VmIP" "printf '[Match]\nName=eth* en*\n\n[Network]\nDHCP=yes\n' | sudo tee /etc/systemd/network/10-dhcp.network"
       if ($LASTEXITCODE -ne 0) { throw "Failed to write 10-dhcp.network" }
 
-      ssh @SshOpts "vagrant@$VmIP" "printf '[DHCPv4]\nClientIdentifier=mac\n' | sudo tee -a /etc/systemd/network/10-dhcp.network"
+      ssh @SshOpts "vagrant@$VmIP" "printf '\n[DHCPv4]\nClientIdentifier=mac\n' | sudo tee -a /etc/systemd/network/10-dhcp.network"
       if ($LASTEXITCODE -ne 0) { throw "Failed to set DHCP client identifier" }
 
       ssh @SshOpts "vagrant@$VmIP" "sudo systemctl enable systemd-networkd"
