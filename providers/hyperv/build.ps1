@@ -85,12 +85,14 @@ function Invoke-GuestNetworkConfig {
       ssh @SshOpts "vagrant@$VmIP" "sudo mkdir -p /etc/systemd/network"
       if ($LASTEXITCODE -ne 0) { throw "Failed to create systemd/network dir" }
 
-      # Write the .network file line by line to avoid CRLF issues
       ssh @SshOpts "vagrant@$VmIP" "printf '[Match]\nName=eth* en*\n\n[Network]\nDHCP=yes\n' | sudo tee /etc/systemd/network/10-dhcp.network"
       if ($LASTEXITCODE -ne 0) { throw "Failed to write 10-dhcp.network" }
 
       ssh @SshOpts "vagrant@$VmIP" "printf '\n[DHCPv4]\nClientIdentifier=mac\n' | sudo tee -a /etc/systemd/network/10-dhcp.network"
       if ($LASTEXITCODE -ne 0) { throw "Failed to set DHCP client identifier" }
+
+      ssh @SshOpts "vagrant@$VmIP" "sudo sed -i 's/^ - networking$/ # - networking/' /etc/cloud/cloud.cfg"
+      if ($LASTEXITCODE -ne 0) { throw "Failed to disable cloud-init network module" }
 
       ssh @SshOpts "vagrant@$VmIP" "sudo systemctl enable systemd-networkd"
       if ($LASTEXITCODE -ne 0) { throw "Failed to enable systemd-networkd" }
@@ -357,10 +359,10 @@ function Invoke-PrepareImage {
       throw "hyperv-daemons install failed"
     }
 
-    Invoke-GuestNetworkConfig -Name $Name -SshOpts $sshOpts -VmIP $vmIP
-
     Write-Host "==> [$Name] Resetting cloud-init state..."
     ssh @sshOpts "vagrant@$vmIP" "sudo cloud-init clean --machine-id"
+
+    Invoke-GuestNetworkConfig -Name $Name -SshOpts $sshOpts -VmIP $vmIP
 
     Write-Host "==> [$Name] Shutting down temp VM..."
     ssh @sshOpts "vagrant@$vmIP" "sudo shutdown -h now" 2>&1 | Out-Null
