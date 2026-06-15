@@ -91,6 +91,12 @@ function Invoke-GuestNetworkConfig {
       ssh @SshOpts "vagrant@$VmIP" "printf '\n[DHCPv4]\nClientIdentifier=mac\n' | sudo tee -a /etc/systemd/network/10-dhcp.network"
       if ($LASTEXITCODE -ne 0) { throw "Failed to set DHCP client identifier" }
 
+      ssh @SshOpts "vagrant@$VmIP" "echo 'SendHostname=yes' | sudo tee -a /etc/systemd/network/10-dhcp.network"
+      if ($LASTEXITCODE -ne 0) { throw "Failed to append SendHostname" }
+
+      ssh @SshOpts "vagrant@$VmIP" "echo 'SendRelease=no' | sudo tee -a /etc/systemd/network/10-dhcp.network"
+      if ($LASTEXITCODE -ne 0) { throw "Failed to append SendRelease" }
+
       ssh @SshOpts "vagrant@$VmIP" "sudo sed -i 's/^ - networking$/ # - networking/' /etc/cloud/cloud.cfg"
       if ($LASTEXITCODE -ne 0) { throw "Failed to disable cloud-init network module" }
 
