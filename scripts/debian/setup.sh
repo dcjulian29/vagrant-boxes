@@ -13,7 +13,13 @@ echo "==> [debian] Enabling and starting SSH service..."
 systemctl enable ssh
 systemctl start  ssh || true
 
-# Disable predictable NIC naming so Vagrant networking stays simple
-ln -sf /dev/null /etc/systemd/network/99-default.link 2>/dev/null || true
+# Re-assert cloud-init network disable in case apt-get upgrade reset it
+mkdir -p /etc/cloud/cloud.cfg.d
+echo 'network: {config: disabled}' > /etc/cloud/cloud.cfg.d/99-disable-network.cfg
+sed -i 's/^ - networking$/ # - networking/' /etc/cloud/cloud.cfg 2>/dev/null || true
+
+# Ensure systemd-networkd is the active network manager
+systemctl enable systemd-networkd
+systemctl enable systemd-resolved
 
 echo "==> [debian] Setup complete."
