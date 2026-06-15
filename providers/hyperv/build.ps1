@@ -292,6 +292,12 @@ function Invoke-PrepareImage {
     Set-VMMemory    -VMName $tmpVm -DynamicMemoryEnabled $false
     Add-VMDvdDrive  -VMName $tmpVm -Path $CidataIso
 
+    # Set boot order: hard disk first, network adapter last to avoid PXE delay
+    $hdd     = Get-VMHardDiskDrive  -VMName $tmpVm
+    $dvd     = Get-VMDvdDrive       -VMName $tmpVm
+    $net     = Get-VMNetworkAdapter -VMName $tmpVm
+    Set-VMFirmware -VMName $tmpVm -BootOrder $hdd, $dvd, $net
+
     $sshOpts = @("-i", $keyPath,
       "-o", "StrictHostKeyChecking=no",
       "-o", "UserKnownHostsFile=/dev/null",
