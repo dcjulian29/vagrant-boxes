@@ -66,7 +66,7 @@ variable "cpus" {
 variable "disk_size" {
   description = "Disk size in MB - cloud image is resized to this on copy"
   type        = number
-  default     = 20480
+  default     = 30720
 }
 
 variable "efi_boot" {

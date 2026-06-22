@@ -262,6 +262,9 @@ function Invoke-PrepareImage {
   Remove-Item $vhdx -Force
   Rename-Item $vhdxFull (Split-Path $vhdx -Leaf)
 
+  Write-Host "==> [$Name] Resizing VHDX to 30 GB..."
+  Resize-VHD -Path $vhdx -SizeBytes (30 * 1MB)
+
   $absVhdx   = (Resolve-Path $vhdx).Path
   $absTmpDir = (Resolve-Path "tmp").Path
 
@@ -432,7 +435,7 @@ function Invoke-BuildBox {
   Write-Host " Output   : $repoBase\boxes\$Name-$Version-$boxSuffix.box"
   Write-Host "------------------------------------------------------------"
 
-  Invoke-PrepareImage -Name $Name -CidataIso $CidataIso
+  Invoke-PrepareImage -Name $Name
   New-Item -ItemType Directory -Force -Path "boxes" | Out-Null
 
   Write-Host "==> [$Name] Removing any leftover Packer VMs (hyperv)..."

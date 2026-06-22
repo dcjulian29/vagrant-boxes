@@ -63,12 +63,6 @@ variable "cpus" {
   default     = 2
 }
 
-variable "disk_size" {
-  description = "Disk size in MB - VHDX is resized to this"
-  type        = number
-  default     = 20480
-}
-
 variable "switch_name" {
   description = "Hyper-V virtual switch name to attach during build"
   type        = string
