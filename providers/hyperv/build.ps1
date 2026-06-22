@@ -222,16 +222,17 @@ function Invoke-PrepareImage {
 
   $url   = $CloudImgUrl[$Name]
   $qcow2 = "$repoBase\tmp\$Name.qcow2"
+  $vmcxDir = "$repoBase\tmp\$Name-vmcx"
+  $vhdx = "$repoBase\tmp\$Name.vhdx"
+  $tmpVm = "$Name-prep"
 
   Write-Host ""
   Write-Host "==> [$Name] Downloading cloud image..."
   Write-Host "    $url"
   curl.exe -fL --progress-bar $url -o $qcow2
 
-
-  $vmcxDir = "$repoBase\tmp\$Name-vmcx"
-  $vhdx = "$repoBase\tmp\$Name.vhdx"
-  $tmpVm   = "$Name-prep"
+  Write-Host "==> [$Name] Expanding cloud image to 30GB..."
+  qemu-img resize $qcow2 30G
 
   Write-Host "==> [$Name] Converting qcow2 -> VHDX..."
   qemu-img convert -p -f qcow2 -O vhdx -o subformat=dynamic $qcow2 $vhdx
@@ -261,9 +262,6 @@ function Invoke-PrepareImage {
 
   Remove-Item $vhdx -Force
   Rename-Item $vhdxFull (Split-Path $vhdx -Leaf)
-
-  Write-Host "==> [$Name] Resizing VHDX to 30 GB..."
-  Resize-VHD -Path $vhdx -SizeBytes (30 * 1MB)
 
   $absVhdx   = (Resolve-Path $vhdx).Path
   $absTmpDir = (Resolve-Path "tmp").Path
