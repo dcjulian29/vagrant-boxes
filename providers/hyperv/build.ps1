@@ -231,8 +231,8 @@ function Invoke-PrepareImage {
   Write-Host "    $url"
   curl.exe -fL --progress-bar $url -o $qcow2
 
-  Write-Host "==> [$Name] Expanding cloud image to 30GB..."
-  qemu-img resize $qcow2 30G
+  Write-Host "==> [$Name] Expanding cloud image to 40GB..."
+  qemu-img resize $qcow2 40G
 
   Write-Host "==> [$Name] Converting qcow2 -> VHDX..."
   qemu-img convert -p -f qcow2 -O vhdx -o subformat=dynamic $qcow2 $vhdx

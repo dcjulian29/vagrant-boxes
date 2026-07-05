@@ -166,7 +166,7 @@ prepare_image_virtualbox() {
   curl -fL --progress-bar "$url" -o "$qcow2"
 
   echo "==> [$name] Resizing cloud image to 30 MB..."
-  qemu-img resize "$qcow2" "30M"
+  qemu-img resize "$qcow2" "40M"
 
   echo "==> [$name] Converting qcow2 -> VMDK..."
   qemu-img convert -p -f qcow2 -O vmdk "$qcow2" "$vmdk"
